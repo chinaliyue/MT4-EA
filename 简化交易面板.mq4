@@ -3,7 +3,7 @@
 //+------------------------------------------------------------------+
 #property copyright "简化交易面板"
 #property link      ""
-#property version   "1.40" // 版本号更新
+#property version   "1.50" // 版本号更新
 #property strict
 
 // 事件常量定义
@@ -12,9 +12,10 @@
 // EA说明
 #property description "简化交易面板EA"
 #property description "提供基础交易功能的快捷操作界面"
-#property description "V1.4: 删除了所有挂单相关功能"
+#property description "V1.5: 为追踪止损添加了开关功能"
 
 // 输入参数
+input bool   EnableTrailingStop = false;     // 追踪止损开关
 input double DefaultLot = 0.01;        // 默认手数
 input int    DefaultSL = 700;          // 默认止损点数
 input int    DefaultTP = 700;         // 默认止盈点数
@@ -26,7 +27,7 @@ input double PresetLot2 = 0.02;        // 预设交易量2
 input double PresetLot3 = 0.05;        // 预设交易量3
 input double PresetLot4 = 0.1;         // 预设交易量4
 
-// 新增输入参数
+// 其他输入参数
 input int Slippage = 3;                // 交易滑点
 input int BreakevenPips = 10;          // 盈亏平衡触发点数
 input ENUM_BASE_CORNER PanelCorner = CORNER_RIGHT_LOWER; // 面板位置
@@ -36,13 +37,13 @@ input int PanelYOffset = 10;           // 面板垂直偏移
 // 常量定义
 #define PANEL_PREFIX "SIMPLE_"
 #define PANEL_WIDTH 210
-#define PANEL_HEIGHT 305  // 面板高度修改
+#define PANEL_HEIGHT 320  // 面板高度修改
 #define BUTTON_HEIGHT 35
 #define EDIT_HEIGHT 25
 #define GAP 5
 
 // 颜色定义
-#define COLOR_BG C'240, 240, 240'      // 背景色
+#define COLOR_BG C'230, 230, 250'      // 背景色
 #define COLOR_SELL C'0, 128, 0'        // 卖出按钮
 #define COLOR_BUY C'255, 0, 0'         // 买入按钮
 #define COLOR_PROFIT C'0, 200, 0'      // 盈利色
@@ -59,11 +60,13 @@ double currentLot;
 int currentSL;
 int currentTP;
 int currentTrailing;
+bool trailingStopActive; // 追踪止损激活状态
 
 // 函数声明
 void SetBreakeven();
 void ClosePartialOrders(double percent);
 void DeleteAllObjects();
+void UpdateTrailingStopButton();
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -75,6 +78,7 @@ int OnInit()
    currentSL = DefaultSL;
    currentTP = DefaultTP;
    currentTrailing = TrailingStop;
+   trailingStopActive = EnableTrailingStop;
    CreatePanel();
    EventSetTimer(1);
    return INIT_SUCCEEDED;
@@ -96,7 +100,10 @@ void OnTimer()
 {
    UpdatePriceDisplay();
    UpdateProfitDisplay();
-   ProcessTrailingStop();
+   if(trailingStopActive) // 只有当开关打开时才执行
+   {
+      ProcessTrailingStop();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -150,14 +157,20 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetString(0, lotEdit, OBJPROP_TEXT, DoubleToStr(currentLot, 2));
          ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       }
-      else if(sparam == Prefix + "BE") // 保本功能事件
+      else if(sparam == Prefix + "BE")
       {
          SetBreakeven();
          ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       }
-      else if(sparam == Prefix + "CLOSE_50") // 部分平仓事件
+      else if(sparam == Prefix + "CLOSE_50")
       {
          ClosePartialOrders(0.5);
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      }
+      else if(sparam == Prefix + "TS_SWITCH") // 追踪止损开关事件
+      {
+         trailingStopActive = !trailingStopActive;
+         UpdateTrailingStopButton();
          ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       }
    }
@@ -197,12 +210,11 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 //+------------------------------------------------------------------+
 void CreatePanel()
 {
-   // 获取图表尺寸并计算面板位置
    int chartWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
    int chartHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   int x = 0, y = 0; // 初始化变量
+   int x = 0, y = 0;
 
-   switch(PanelCorner) // 根据用户选择确定面板位置
+   switch(PanelCorner)
    {
       case CORNER_LEFT_UPPER:
          x = PanelXOffset;
@@ -222,63 +234,73 @@ void CreatePanel()
          break;
    }
    
-   // 背景
    CreateRectLabel(Prefix + "BG", x-GAP, y-GAP, PANEL_WIDTH, PANEL_HEIGHT, COLOR_BG);
    
-   // 一键平仓（包含盈亏显示）
    CreateButton(Prefix + "CLOSE_ALL", x, y, PANEL_WIDTH-20, BUTTON_HEIGHT, "一键平仓 | $0.00", clrRed);
    y += BUTTON_HEIGHT + GAP;
    
-   // 新增功能按钮
    CreateButton(Prefix + "BE", x, y, (PANEL_WIDTH-20)/2 - 2, BUTTON_HEIGHT, "一键保本", clrBlue);
    CreateButton(Prefix + "CLOSE_50", x + (PANEL_WIDTH-20)/2 + 2, y, (PANEL_WIDTH-20)/2 - 2, BUTTON_HEIGHT, "平仓50%", clrBlue);
    y += BUTTON_HEIGHT + GAP;
 
-   // 预设交易量按钮
    CreateButton(Prefix + "LOT_001", x, y, 46, 25, DoubleToStr(PresetLot1, 2), clrGray);
    CreateButton(Prefix + "LOT_01", x + 47, y, 46, 25, DoubleToStr(PresetLot2, 2), clrGray);
    CreateButton(Prefix + "LOT_1", x + 94, y, 46, 25, DoubleToStr(PresetLot3, 2), clrGray);
    CreateButton(Prefix + "LOT_10", x + 141, y, 44, 25, DoubleToStr(PresetLot4, 2), clrGray);
    y += 30;
    
-   // SELL按钮
    CreateButton(Prefix + "SELL", x, y, 60, BUTTON_HEIGHT, "SELL", COLOR_SELL);
-   
-   // 手数输入
    CreateEdit(lotEdit, x + 65, y, DoubleToStr(currentLot, 2));
-   
-   // BUY按钮
    CreateButton(Prefix + "BUY", x + 125, y, 60, BUTTON_HEIGHT, "BUY", COLOR_BUY);
    y += BUTTON_HEIGHT + GAP;
    
-   // 价格显示区域
    CreateLabel(Prefix + "PRICE1", x, y, "0.0", clrBlue);
    CreateLabel(Prefix + "SPREAD", x + 65, y, "0.0", clrBlack);
    CreateLabel(Prefix + "PRICE2", x + 125, y, "0.0", clrRed);
    y += 25;
    
-   // 止损设置
    CreateLabel(Prefix + "SL_LABEL", x, y, "止损", clrBlack);
    CreateEdit(slEdit, x + 35, y, IntegerToString(currentSL));
    CreateLabel(Prefix + "TP_LABEL", x + 100, y, "止盈", clrBlack);
    CreateEdit(tpEdit, x + 125, y, IntegerToString(currentTP));
    y += EDIT_HEIGHT + GAP;
    
-   // 追踪止损
-   CreateLabel(Prefix + "TRAILING_LABEL", x, y, "追踪止损点数", clrBlack);
+   // 追踪止损区域
+   CreateButton(Prefix + "TS_SWITCH", x, y, 80, 20, "", clrNONE); // 创建开关按钮
+   UpdateTrailingStopButton(); // 初始化按钮状态
    CreateEdit(trailingEdit, x + 85, y, IntegerToString(currentTrailing));
    y += EDIT_HEIGHT + GAP;
    
-   // 平仓反手
    CreateButton(Prefix + "CLOSE_REVERSE", x, y, PANEL_WIDTH-20, BUTTON_HEIGHT, "平仓反手", clrOrange);
    y += BUTTON_HEIGHT + GAP;
    
-   // 实际止损止盈额度显示
    CreateLabel(Prefix + "ACTUAL_SL", x, y, "实际止损: $0.00", clrRed);
    CreateLabel(Prefix + "ACTUAL_TP", x + 100, y, "实际止盈: $0.00", clrGreen);
    
    ChartRedraw();
 }
+
+//+------------------------------------------------------------------+
+//| 更新追踪止损按钮状态                                             |
+//+------------------------------------------------------------------+
+void UpdateTrailingStopButton()
+{
+   string text;
+   color bgColor;
+   if(trailingStopActive)
+   {
+      text = "追踪止损: 开";
+      bgColor = clrGreen;
+   }
+   else
+   {
+      text = "追踪止损: 关";
+      bgColor = clrRed;
+   }
+   ObjectSetString(0, Prefix + "TS_SWITCH", OBJPROP_TEXT, text);
+   ObjectSetInteger(0, Prefix + "TS_SWITCH", OBJPROP_BGCOLOR, bgColor);
+}
+
 
 //+------------------------------------------------------------------+
 //| 创建按钮                                                         |
@@ -417,7 +439,6 @@ void UpdatePriceDisplay()
    RefreshRates();
    ObjectSetString(0, Prefix + "PRICE1", OBJPROP_TEXT, DoubleToStr(Bid, Digits));
    ObjectSetString(0, Prefix + "PRICE2", OBJPROP_TEXT, DoubleToStr(Ask, Digits));
-   // 计算并显示点差
    double spread = (Ask - Bid) / Point;
    ObjectSetString(0, Prefix + "SPREAD", OBJPROP_TEXT, DoubleToStr(spread, 1));
 }
@@ -437,7 +458,6 @@ void UpdateProfitDisplay()
          if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
          {
             totalProfit += OrderProfit() + OrderSwap() + OrderCommission();
-            // 计算实际止损止盈额度
             if(OrderStopLoss() > 0)
             {
                double slAmount = 0;
@@ -465,13 +485,11 @@ void UpdateProfitDisplay()
       }
    }
    
-   // 更新 "Close All" 按钮文本
    string closeButtonText = "一键平仓 | $" + DoubleToStr(totalProfit, 2);
    color buttonColor = (totalProfit >= 0) ? clrGreen : clrRed;
    ObjectSetString(0, Prefix + "CLOSE_ALL", OBJPROP_TEXT, closeButtonText);
    ObjectSetInteger(0, Prefix + "CLOSE_ALL", OBJPROP_BGCOLOR, buttonColor);
    
-   // 更新实际止损止盈显示
    ObjectSetString(0, Prefix + "ACTUAL_SL", OBJPROP_TEXT, "实际止损: $" + DoubleToStr(totalSLAmount, 2));
    ObjectSetString(0, Prefix + "ACTUAL_TP", OBJPROP_TEXT, "实际止盈: $" + DoubleToStr(totalTPAmount, 2));
 }
@@ -522,7 +540,6 @@ void ProcessTrailingStop()
 //+------------------------------------------------------------------+
 void CloseAndReverse()
 {
-   // 统计当前持仓
    int buyCount = 0, sellCount = 0;
    double totalBuyLots = 0, totalSellLots = 0;
    
@@ -546,16 +563,12 @@ void CloseAndReverse()
       }
    }
    
-   // 先平仓所有订单
    CloseAllOrders();
-   // 等待平仓完成
    Sleep(500);
    
-   // 反向开仓
    RefreshRates();
    if(buyCount > 0 && totalBuyLots > 0)
    {
-      // 原来是多单，现在开空单
       double price = Bid;
       double sl = 0, tp = 0;
       
@@ -573,7 +586,6 @@ void CloseAndReverse()
    
    if(sellCount > 0 && totalSellLots > 0)
    {
-      // 原来是空单，现在开多单
       double price = Ask;
       double sl = 0, tp = 0;
       
@@ -607,7 +619,7 @@ void DeleteAllObjects()
 }
 
 //+------------------------------------------------------------------+
-//| 新增: 设置止损为盈亏平衡点                                       |
+//| 设置止损为盈亏平衡点                                             |
 //+------------------------------------------------------------------+
 void SetBreakeven()
 {
@@ -650,7 +662,7 @@ void SetBreakeven()
 }
 
 //+------------------------------------------------------------------+
-//| 新增: 部分平仓                                                   |
+//| 部分平仓                                                         |
 //+------------------------------------------------------------------+
 void ClosePartialOrders(double percent)
 {
