@@ -3,7 +3,7 @@
 //+------------------------------------------------------------------+
 #property copyright "简化交易面板"
 #property link      ""
-#property version   "1.50" // 版本号更新
+#property version   "1.60" // 版本号更新
 #property strict
 
 // 事件常量定义
@@ -13,9 +13,11 @@
 #property description "简化交易面板EA"
 #property description "提供基础交易功能的快捷操作界面"
 #property description "V1.5: 为追踪止损添加了开关功能"
+#property description "V1.6: 增加接管所有订单功能"
 
 // 输入参数
-input bool   EnableTrailingStop = false;     // 追踪止损开关
+input bool   EnableTrailingStop = false; // 追踪止损开关
+input bool   ManageAllOrders = true;   // 接管所有订单
 input double DefaultLot = 0.01;        // 默认手数
 input int    DefaultSL = 700;          // 默认止损点数
 input int    DefaultTP = 700;         // 默认止盈点数
@@ -36,8 +38,8 @@ input int PanelYOffset = 10;           // 面板垂直偏移
 
 // 常量定义
 #define PANEL_PREFIX "SIMPLE_"
-#define PANEL_WIDTH 210
-#define PANEL_HEIGHT 310  // 面板高度修改
+#define PANEL_WIDTH 200   // 面板宽度修改
+#define PANEL_HEIGHT 280  // 面板高度修改
 #define BUTTON_HEIGHT 30
 #define EDIT_HEIGHT 20
 #define GAP 5
@@ -235,25 +237,20 @@ void CreatePanel()
    }
    
    CreateRectLabel(Prefix + "BG", x-GAP, y-GAP, PANEL_WIDTH, PANEL_HEIGHT, COLOR_BG);
-   
    CreateButton(Prefix + "CLOSE_ALL", x, y, PANEL_WIDTH-20, BUTTON_HEIGHT, "一键平仓 | $0.00", clrRed);
    y += BUTTON_HEIGHT + GAP;
-   
    CreateButton(Prefix + "BE", x, y, (PANEL_WIDTH-20)/2 - 2, BUTTON_HEIGHT, "一键保本", clrBlue);
    CreateButton(Prefix + "CLOSE_50", x + (PANEL_WIDTH-20)/2 + 2, y, (PANEL_WIDTH-20)/2 - 2, BUTTON_HEIGHT, "平仓50%", clrBlue);
    y += BUTTON_HEIGHT + GAP;
-
    CreateButton(Prefix + "LOT_001", x, y, 46, 25, DoubleToStr(PresetLot1, 2), clrGray);
    CreateButton(Prefix + "LOT_01", x + 47, y, 46, 25, DoubleToStr(PresetLot2, 2), clrGray);
    CreateButton(Prefix + "LOT_1", x + 94, y, 46, 25, DoubleToStr(PresetLot3, 2), clrGray);
    CreateButton(Prefix + "LOT_10", x + 141, y, 44, 25, DoubleToStr(PresetLot4, 2), clrGray);
    y += 30;
-   
    CreateButton(Prefix + "SELL", x, y, 60, BUTTON_HEIGHT, "SELL", COLOR_SELL);
    CreateEdit(lotEdit, x + 65, y, DoubleToStr(currentLot, 2));
    CreateButton(Prefix + "BUY", x + 125, y, 60, BUTTON_HEIGHT, "BUY", COLOR_BUY);
    y += BUTTON_HEIGHT + GAP;
-   
    CreateLabel(Prefix + "PRICE1", x, y, "0.0", clrBlue);
    CreateLabel(Prefix + "SPREAD", x + 65, y, "0.0", clrBlack);
    CreateLabel(Prefix + "PRICE2", x + 125, y, "0.0", clrRed);
@@ -264,16 +261,13 @@ void CreatePanel()
    CreateLabel(Prefix + "TP_LABEL", x + 100, y, "止盈", clrBlack);
    CreateEdit(tpEdit, x + 125, y, IntegerToString(currentTP));
    y += EDIT_HEIGHT + GAP;
-   
    // 追踪止损区域
    CreateButton(Prefix + "TS_SWITCH", x, y, 80, 20, "", clrNONE); // 创建开关按钮
    UpdateTrailingStopButton(); // 初始化按钮状态
    CreateEdit(trailingEdit, x + 85, y, IntegerToString(currentTrailing));
    y += EDIT_HEIGHT + GAP;
-   
    CreateButton(Prefix + "CLOSE_REVERSE", x, y, PANEL_WIDTH-20, BUTTON_HEIGHT, "平仓反手", clrOrange);
    y += BUTTON_HEIGHT + GAP;
-   
    CreateLabel(Prefix + "ACTUAL_SL", x, y, "实际止损: $0.00", clrRed);
    CreateLabel(Prefix + "ACTUAL_TP", x + 100, y, "实际止盈: $0.00", clrGreen);
    
@@ -417,11 +411,10 @@ void CloseAllOrders()
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
+         if(OrderSymbol() == Symbol() && (ManageAllOrders || OrderMagicNumber() == Magic))
          {
             RefreshRates();
             double closePrice = (OrderType() == OP_BUY) ? Bid : Ask;
-            
             if(!OrderClose(OrderTicket(), OrderLots(), closePrice, Slippage, clrYellow))
             {
                Print("平仓失败，订单号: ", OrderTicket(), ", 错误代码: ", GetLastError());
@@ -455,7 +448,7 @@ void UpdateProfitDisplay()
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
+         if(OrderSymbol() == Symbol() && (ManageAllOrders || OrderMagicNumber() == Magic))
          {
             totalProfit += OrderProfit() + OrderSwap() + OrderCommission();
             if(OrderStopLoss() > 0)
@@ -505,7 +498,7 @@ void ProcessTrailingStop()
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
+         if(OrderSymbol() == Symbol() && (ManageAllOrders || OrderMagicNumber() == Magic))
          {
             RefreshRates();
             if(OrderType() == OP_BUY)
@@ -542,12 +535,11 @@ void CloseAndReverse()
 {
    int buyCount = 0, sellCount = 0;
    double totalBuyLots = 0, totalSellLots = 0;
-   
    for(int i = 0; i < OrdersTotal(); i++)
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
+         if(OrderSymbol() == Symbol() && (ManageAllOrders || OrderMagicNumber() == Magic))
          {
             if(OrderType() == OP_BUY)
             {
@@ -627,7 +619,7 @@ void SetBreakeven()
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
+         if(OrderSymbol() == Symbol() && (ManageAllOrders || OrderMagicNumber() == Magic))
          {
             RefreshRates();
             if(OrderType() == OP_BUY)
@@ -636,6 +628,7 @@ void SetBreakeven()
                {
                   if(OrderStopLoss() < OrderOpenPrice())
                   {
+            
                      if(!OrderModify(OrderTicket(), OrderOpenPrice(), OrderOpenPrice(), OrderTakeProfit(), 0, clrGreen))
                      {
                         Print("设置保本失败，错误代码: ", GetLastError());
@@ -651,6 +644,7 @@ void SetBreakeven()
                   {
                      if(!OrderModify(OrderTicket(), OrderOpenPrice(), OrderOpenPrice(), OrderTakeProfit(), 0, clrGreen))
                      {
+   
                         Print("设置保本失败，错误代码: ", GetLastError());
                      }
                   }
@@ -670,7 +664,7 @@ void ClosePartialOrders(double percent)
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(OrderSymbol() == Symbol() && OrderMagicNumber() == Magic)
+         if(OrderSymbol() == Symbol() && (ManageAllOrders || OrderMagicNumber() == Magic))
          {
             double lotsToClose = OrderLots() * percent;
             lotsToClose = NormalizeDouble(lotsToClose, 2);
