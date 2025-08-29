@@ -37,9 +37,9 @@ input int PanelYOffset = 10;           // 面板垂直偏移
 // 常量定义
 #define PANEL_PREFIX "SIMPLE_"
 #define PANEL_WIDTH 210
-#define PANEL_HEIGHT 320  // 面板高度修改
-#define BUTTON_HEIGHT 35
-#define EDIT_HEIGHT 25
+#define PANEL_HEIGHT 310  // 面板高度修改
+#define BUTTON_HEIGHT 30
+#define EDIT_HEIGHT 20
 #define GAP 5
 
 // 颜色定义
